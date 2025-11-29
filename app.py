@@ -1,181 +1,137 @@
-import tkinter as tk
-from tkinter import messagebox
-import re, random, threading, time
-import winsound
-import sys
+import streamlit as st
+import random, re, time
 
-MODES = {"A": "Polished & Mild","B": "Chaotic but Playable","C": "Unhinged Chaos","D": "Hardcore Hell"}
-INSULTS = ["You nincompoop!", "Try harder, fool!", "Is that all you got?", "Pathetic attempt!", "Epic fail!"]
+st.set_page_config(page_title="Password Game", layout="centered")
 
-class Game:
-    def _init_(self, root, mode):
-        self.root = root
-        self.mode = mode
-        self.fire = 0
-        self.chosen_animal = random.choice(["cat","dog","fox","owl","bear"])
-        self.root.title("Password Game – Mode " + mode)
-        self.root.geometry("600x450")
-        self.root.configure(bg="#222")  # static background color
+MODES = {
+    "A": "Polished & Mild",
+    "B": "Chaotic but Playable",
+    "C": "Unhinged Chaos",
+    "D": "Hardcore Hell"
+}
 
-        self.start_time = time.time()  # Track game start
+INSULTS = [
+    "You nincompoop!", "Try harder, fool!",
+    "Is that all you got?", "Pathetic attempt!",
+    "Epic fail!"
+]
 
-        self.msg = tk.StringVar()
-        self.msg.set("Enter a password… if you dare.")
-        tk.Label(root,textvariable=self.msg,bg="#222",fg="white",font=("Arial",14),wraplength=560).pack(pady=20)
+# ---------------------- STATE SETUP ----------------------
+if "mode" not in st.session_state:
+    st.session_state.mode = None
+if "fire" not in st.session_state:
+    st.session_state.fire = 0
+if "start_time" not in st.session_state:
+    st.session_state.start_time = time.time()
+if "animal" not in st.session_state:
+    st.session_state.animal = random.choice(["cat","dog","fox","owl","bear"])
+if "egg_state" not in st.session_state:
+    st.session_state.egg_state = "🥚"
+if "turkey_pos" not in st.session_state:
+    st.session_state.turkey_pos = random.randint(5,95)
 
-        self.show_password = tk.BooleanVar(value=False)
-        self.entry = tk.Entry(root,font=("Arial",16),width=32,show="*")
-        self.entry.pack(pady=10)
 
-        tk.Checkbutton(root,text="Show Password",variable=self.show_password,bg="#222",fg="white",
-                       command=self.toggle_password).pack(pady=5)
+# ---------------------- MODE PICKER ----------------------
+if st.session_state.mode is None:
+    st.title("🧩 The Password Game")
+    st.write("Choose your chaos level:")
 
-        tk.Button(root,text="Submit",command=self.check,bg="#444",fg="white",font=("Arial",14)).pack(pady=10)
-        tk.Button(root,text="Give Up",command=self.give_up,bg="#555",fg="white",font=("Arial",12)).pack(pady=5)
+    for m, desc in MODES.items():
+        if st.button(f"{m} — {desc}"):
+            st.session_state.mode = m
+            st.rerun()
 
-        # Turkey & Egg as labels (no files)
-        if mode in ["C","D"]:
-            self.turkey_label = tk.Label(root,text="🦃",font=("Arial",20),bg="#222")
-            self.turkey_label.place(x=400,y=300)
-        if mode in ["B","C","D"]:
-            self.egg_label = tk.Label(root,text="🥚",font=("Arial",20),bg="#222")
-            self.egg_label.place(x=50,y=300)
+    st.stop()
 
-        self.rules = self.generate_rules()
-        self.original_rules = self.rules.copy()  # Keep original rules for reference
 
-        # Schedule smooth dynamic difficulty check
-        self.root.after(60000, self.dynamic_difficulty_check)  # every 60 seconds
-        # Schedule 10-minute explosion
-        self.root.after(600000, self.explode_game)  # 10 minutes = 600,000ms
+mode = st.session_state.mode
+st.title(f"🔐 Password Game — Mode {mode}")
+st.write("Enter a password… if you dare.")
 
-    def toggle_password(self):
-        self.entry.config(show="" if self.show_password.get() else "*")
+# ---------------------- ANIMATED EMOJIS ----------------------
+col1, col2 = st.columns(2)
 
-    def generate_rules(self):
-        base = [
-            lambda p: len(p)>=6 or self.fail("Make it longer."),
-            lambda p: any(x.isdigit() for x in p) or self.fail("Add a number."),
-            lambda p: any(x.isupper() for x in p) or self.fail("SHOUT one letter."),
-            lambda p: self.chosen_animal in p.lower() or self.fail(f"Where is the {self.chosen_animal}?"),
-            lambda p: sum(int(x) for x in re.findall(r"\d",p))==10 or self.fail("Digits must add to 10."),
-            lambda p: " " not in p or self.fail("No spaces."),
+with col1:
+    st.markdown(f"### {st.session_state.egg_state}")
+with col2:
+    if mode in ["C","D"]:
+        st.markdown(f"### 🦃 (at {st.session_state.turkey_pos}%)")
+
+st.progress(min(st.session_state.fire / 10, 1.0), text="🔥 Fire / Failure Meter")
+
+
+# ---------------------- RULES GENERATOR ----------------------
+def generate_rules(mode):
+    base = [
+        lambda p: len(p)>=6 or fail("Make it longer."),
+        lambda p: any(x.isdigit() for x in p) or fail("Add a number."),
+        lambda p: any(x.isupper() for x in p) or fail("SHOUT one letter."),
+        lambda p: st.session_state.animal in p.lower() or fail(f"Where is the {st.session_state.animal}?"),
+        lambda p: sum(int(x) for x in re.findall(r"\d",p))==10 or fail("Digits must add to 10."),
+        lambda p: " " not in p or fail("No spaces allowed."),
+    ]
+
+    if mode == "A":
+        return base
+
+    if mode == "B":
+        return base + [
+            lambda p: "egg" in p.lower() or fail("Include the egg!")
         ]
-        if self.mode=="A": return base
-        if self.mode=="B": return base + [lambda p: "egg" in p.lower() or self.fail("Include the egg!")]
-        if self.mode=="C": return base + [
-            lambda p: "egg" in p.lower() or self.fail("Find the moving egg!"),
-            lambda p: self.fire<2 or self.fail("🔥 Fire burned it."),
-            lambda p: "gobble" in p.lower() or self.fail("Turkey wants gobble."),
-        ]
-        if self.mode=="D": return base + [
-            lambda p: "egg" in p.lower() and "fire" in p.lower() or self.fail("Need egg AND fire!"),
-            lambda p: p.count("A")==2 or self.fail("Exactly 2 capital A's."),
-            lambda p: any(x in p for x in "#@$&") or self.fail("Add 1 special char."),
-            lambda p: p[::-1]!=p or self.fail("No palindromes allowed!"),
+
+    if mode == "C":
+        return base + [
+            lambda p: "egg" in p.lower() or fail("Find the moving egg!"),
+            lambda p: st.session_state.fire < 2 or fail("🔥 Fire burned it."),
+            lambda p: "gobble" in p.lower() or fail("Turkey wants gobble."),
         ]
 
-    def fail(self, message):
-        insult = random.choice(INSULTS)
-        self.msg.set(f"❌ {message} {insult}")
-        self.fire += 1
-        self.shake_window()
-        if self.mode in ["C","D"]:
-            self.move_turkey()
-            self.hatch_egg()
-            threading.Thread(target=self.play_sound).start()
-        return False
+    if mode == "D":
+        return base + [
+            lambda p: ("egg" in p.lower() and "fire" in p.lower()) or fail("Need egg AND fire!"),
+            lambda p: p.count("A")==2 or fail("Exactly 2 capital A's."),
+            lambda p: any(x in p for x in "#@$&") or fail("Add 1 special char."),
+            lambda p: p[::-1]!=p or fail("No palindromes allowed!"),
+        ]
 
-    def check(self):
-        pwd = self.entry.get()
-        for rule in self.rules:
-            if rule(pwd) is False: return
-        messagebox.showinfo("Victory","🎉 Password accepted… for now.")
-        self.root.destroy()
+rules = generate_rules(mode)
 
-    def give_up(self):
-        if messagebox.askyesno("Give Up","Do you really want to give up?"):
-            self.root.destroy()
 
-    # ---------------- Chaos Effects ----------------
-    def shake_window(self):
-        x, y = self.root.winfo_x(), self.root.winfo_y()
-        for _ in range(5):
-            for dx,dy in [(-10,0),(10,0),(0,-10),(0,10)]:
-                self.root.geometry(f"+{x+dx}+{y+dy}")
-                self.root.update()
-                time.sleep(0.02)
-        self.root.geometry(f"+{x}+{y}")
+# ---------------------- FAIL HANDLER ----------------------
+def fail(message):
+    insult = random.choice(INSULTS)
+    st.error(f"❌ {message} {insult}")
+    st.session_state.fire += 1
 
-    def move_turkey(self):
-        if hasattr(self,"turkey_label"):
-            x, y = random.randint(0,500), random.randint(100,350)
-            self.turkey_label.place(x=x,y=y)
+    # Animate egg
+    st.session_state.egg_state = "🐣"
+    st.session_state.egg_state = "🥚"
 
-    def hatch_egg(self):
-        if hasattr(self,"egg_label"):
-            self.egg_label.config(text="🐣")
-            self.root.after(1000, lambda: self.egg_label.config(text="🥚"))
+    # Move turkey
+    st.session_state.turkey_pos = random.randint(1, 99)
 
-    def play_sound(self):
-        for _ in range(2):
-            winsound.Beep(800+random.randint(0,400),150)
-            time.sleep(0.05)
+    st.stop()
 
-    # ---------------- Smooth Dynamic Difficulty ----------------
-    def dynamic_difficulty_check(self):
-        elapsed = time.time() - self.start_time
-        if elapsed > 180:  # After 3 minutes
-            relaxed_rules = []
-            for r in self.rules:
-                try:
-                    test_pwd = "Aa1"+self.chosen_animal+"egg"
-                    if r(test_pwd) is not False:
-                        relaxed_rules.append(r)
-                except:
-                    continue
-            if len(relaxed_rules) < len(self.rules):
-                self.rules = relaxed_rules
-                self.msg.set(f"⏱ Time's passing… some rules are easing.")
-        self.root.after(60000, self.dynamic_difficulty_check)  # check again in 1 min
 
-    # ---------------- 10-minute Explosion ----------------
-    def explode_game(self):
-        if self.root.winfo_exists():
-            explosion = tk.Toplevel(self.root)
-            explosion.attributes("-fullscreen", True)
-            explosion.configure(bg="red")
-            tk.Label(explosion, text="💥 BOOM! 💥", font=("Arial", 80), fg="yellow", bg="red").pack(expand=True)
-            self.root.withdraw()
-            threading.Thread(target=self.play_explosion_sound, args=(explosion,)).start()
+# ---------------------- PASSWORD INPUT ----------------------
+pwd = st.text_input("Password:", type="password")
 
-    def play_explosion_sound(self, explosion):
-        for _ in range(10):
-            winsound.Beep(1000+random.randint(0,500), 150)
-            time.sleep(0.05)
-        time.sleep(1)
-        explosion.destroy()
-        self.restart_game()
+if st.button("Submit"):
+    passed_all = True
+    for rule in rules:
+        if rule(pwd) is False:
+            passed_all = False
+            break
 
-    def restart_game(self):
-        python = sys.executable
-        self.root.destroy()
-        threading.Thread(target=lambda: _import_("os").execv(python, [python] + sys.argv)).start()
+    if passed_all:
+        st.success("🎉 Password accepted… for now.")
+        st.balloons()
+        st.write("Game over. Restart to try another mode.")
+        st.stop()
 
-def choose_mode():
-    picker = tk.Tk()
-    picker.title("Select Mode")
-    picker.geometry("350x260")
-    picker.configure(bg="#222")
-    tk.Label(picker,text="Choose a Password Game Mode:",fg="white",bg="#222",font=("Arial",14)).pack(pady=20)
-    def start(mode):
-        picker.destroy()
-        root = tk.Tk()
-        Game(root, mode)
-        root.mainloop()
-    for m,desc in MODES.items():
-        tk.Button(picker,text=f"{m} — {desc}",width=25,bg="#444",fg="white",font=("Arial",12),
-                  command=lambda mm=m: start(mm)).pack(pady=5)
-    picker.mainloop()
 
-choose_mode()
+# ---------------------- GIVE UP ----------------------
+if st.button("Give Up"):
+    st.warning("You gave up. Understandable 😔")
+    st.session_state.mode = None
+    st.rerun()
